@@ -1,0 +1,14 @@
+{
+  "name": "aseprite-codex-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Linux MCP bridge for live and batch Aseprite scripting",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/server.mjs",
+    "setup": "node scripts/setup.mjs",
+    "test": "node --test test/*.test.mjs"
+  },
+  "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.25.0" }
+}
