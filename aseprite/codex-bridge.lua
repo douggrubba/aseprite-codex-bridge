@@ -33,12 +33,20 @@ local function tick()
     if name:match('^job%-') then core.process(app.fs.joinPath(root, name), session) end
   end
 end
+-- A tick can open a modal dialog (Aseprite's script file-access prompt), and the
+-- timer keeps firing inside it. Skip ticks while one is still running so they
+-- can't nest until the C stack overflows.
+local busy = false
 timer = Timer{ interval=0.2, ontick=function()
+  if busy then return end
+  busy = true
   local ok, err = pcall(tick)
+  busy = false
   if not ok then
-    dialog:modify{ id='status', text='Bridge error — reconnect to retry' }
-    stop()
+    timer:stop()
     print('Codex bridge: ' .. tostring(err))
+    pcall(function() dialog:modify{ id='status', text='Bridge error — reconnect to retry' } end)
+    stop()
   end
 end }
 _G.codexBridge = {dialog=dialog, timer=timer}
