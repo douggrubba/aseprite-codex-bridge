@@ -88,8 +88,10 @@ You do **not** need to run `npm start` in another terminal.
 4. Allow file access when Aseprite prompts for the installed bridge scripts.
 5. Leave the **Codex bridge** dialog open.
 
-The dialog should say **Connected — ready for Codex**. Closing it disconnects
-the live editor. Connect only one Aseprite window at a time.
+The dialog should say **Connected — ready for Codex**. Closing it only hides it,
+so pressing Esc while you draw won't disconnect; choose **File → Scripts →
+codex-bridge** to show it again, and click **Disconnect** to stop the bridge.
+Connect only one Aseprite window at a time.
 
 ### 4. Try your first prompt
 
@@ -313,7 +315,7 @@ listener; tool results and previews are returned to Codex for use in the convers
 
 ## Updating and uninstalling
 
-To update, close the bridge dialog, get the updated project files, and run:
+To update, click **Disconnect** in the bridge dialog, get the updated project files, and run:
 
 ```sh
 npm ci
@@ -326,7 +328,7 @@ the quick start.
 
 To uninstall:
 
-1. Close the **Codex bridge** dialog.
+1. Click **Disconnect** in the **Codex bridge** dialog.
 2. Run `codex mcp remove aseprite`.
 3. Remove `codex-bridge.lua` and `codex-bridge-support/` from the script folders printed by setup, then rescan scripts.
 4. Optionally remove the project folder and shared queue after checking for files you want to keep. Live smoke-test outputs are in `artifacts/`.
