@@ -23,10 +23,19 @@ local function stop()
   if ok and heartbeat.session == session then os.remove(app.fs.joinPath(root, 'heartbeat.json')) end
   _G.codexBridge = nil
 end
-dialog = Dialog{ title='Codex bridge', onclose=stop }
+-- Esc closes non-modal dialogs and Enter presses a focused button, so closing the
+-- dialog only hides it; the bridge stops when Disconnect is clicked. Running the
+-- script again shows the dialog (see the _G.codexBridge check above).
+local disconnecting = false
+dialog = Dialog{ title='Codex bridge', onclose=function()
+  if disconnecting then stop() end
+end }
 dialog:label{ id='status', text='Connected — ready for Codex' }
-dialog:label{ text='Close this dialog to disconnect.' }
-dialog:button{ text='Disconnect', onclick=function() dialog:close() end }
+dialog:label{ text='Closing this window keeps the bridge running.' }
+dialog:button{ text='Disconnect', focus=false, onclick=function()
+  disconnecting = true
+  dialog:close()
+end }
 local function tick()
   core.write(app.fs.joinPath(root, 'heartbeat.json'), {session=session, time=os.time(), version=tostring(app.version)})
   for _, name in ipairs(app.fs.listFiles(root)) do
