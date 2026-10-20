@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Local Linux MCP bridge for live and batch Aseprite scripting",
+  "description": "Local macOS and Linux MCP bridge for live and batch Aseprite scripting",
   "engines": { "node": ">=22" },
   "scripts": {
     "start": "node src/server.mjs",

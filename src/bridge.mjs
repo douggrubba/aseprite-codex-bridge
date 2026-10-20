@@ -26,6 +26,7 @@ async function readHeartbeat(root) {
 export async function findAseprite() {
   if (process.env.ASEPRITE_BIN) return process.env.ASEPRITE_BIN;
   const homes = [
+    ...(process.platform === 'darwin' ? ['Library/Application Support/Steam'] : []),
     '.steam/steam', '.local/share/Steam',
     'snap/steam/common/.local/share/Steam',
     '.var/app/com.valvesoftware.Steam/.local/share/Steam',
@@ -38,12 +39,17 @@ export async function findAseprite() {
   }
   const candidates = [
     ...(process.env.PATH || '').split(path.delimiter).map(p => path.join(p, 'aseprite')),
+    ...(process.platform === 'darwin' ? [
+      '/Applications/Aseprite.app/Contents/MacOS/aseprite',
+      path.join(os.homedir(), 'Applications/Aseprite.app/Contents/MacOS/aseprite'),
+      ...homes.map(p => path.join(p, 'steamapps/common/Aseprite/Aseprite.app/Contents/MacOS/aseprite')),
+    ] : []),
     ...homes.map(p => path.join(p, 'steamapps/common/Aseprite/aseprite')),
   ];
   for (const candidate of candidates) {
     try { await fs.access(candidate, constants.X_OK); return candidate; } catch {}
   }
-  throw new Error('Aseprite not found. Set ASEPRITE_BIN to the Linux executable.');
+  throw new Error('Aseprite not found. Set ASEPRITE_BIN to the Aseprite executable (on macOS, Aseprite.app/Contents/MacOS/aseprite).');
 }
 
 export class Bridge {

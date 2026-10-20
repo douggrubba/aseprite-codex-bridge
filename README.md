@@ -2,7 +2,7 @@
 
 **Talk to Codex. Watch your sprites change in Aseprite.**
 
-A Linux bridge for working on pixel art with Codex CLI. Inspect the document you
+A macOS and Linux bridge for working on pixel art with Codex CLI. Inspect the document you
 have open, edit layers and pixels through Lua, preview the result, and export
 assets for your game—all from a conversation.
 
@@ -29,14 +29,16 @@ Codex still uses your existing sign-in and model access; Aseprite must be instal
 
 | Requirement | Details |
 | --- | --- |
-| Linux | This project targets Linux. Other operating systems are not tested. |
+| macOS or Linux | Supports native and Steam installations. Windows is not supported. |
 | Node.js and npm | Node.js **22 or newer**; npm installs the bridge dependencies. |
 | Codex CLI | Installed and working in your terminal. |
 | Aseprite | A **1.3-series or newer** build with Lua and JSON scripting support. |
 
-**Verified setup:** Aseprite **1.3.18.6** on Linux, using the executable supplied
-by Steam Snap. Live editing, undo, previews, saving, and sprite-sheet export have
-been exercised against that installation. Other packaging variants need local verification.
+**Verified setups:** Aseprite **1.3.18.6** on Linux using Steam Snap, and
+**1.3.18.6-arm64** on macOS using Steam. The automated integration suite and live
+editing, undo, previews, saving, and sprite-sheet export have passed on macOS.
+Those live operations have also been exercised on the Linux installation.
+Other packaging variants need local verification.
 
 Check your terminal tools:
 
@@ -137,6 +139,19 @@ silently falls back to batch mode if the editor disconnects.
 
 For everyday use, leave live mode enabled and tell Codex when you want a background job.
 
+## macOS installation notes
+
+Setup installs the bridge into `~/Library/Application Support/Aseprite/scripts`.
+The executable detector searches `PATH`, `/Applications/Aseprite.app`,
+`~/Applications/Aseprite.app`, and the Steam libraries under
+`~/Library/Application Support/Steam` (including additional libraries listed in
+`libraryfolders.vdf`).
+
+For a custom installation, set `ASEPRITE_BIN` to the executable **inside** the
+app bundle, for example `/Applications/Aseprite.app/Contents/MacOS/aseprite`.
+Quote paths containing spaces. The quick-start commands are the same on macOS
+and Linux.
+
 ## Linux installation notes
 
 The executable detector searches `PATH`, standard Steam library locations, and
@@ -181,7 +196,7 @@ on the setup command does not configure Codex's server environment.
 
 The default queue is `~/aseprite-bridge-data`. It is a visible home-directory
 folder so Steam Snap can access it, with permissions restricted to its owner
-(`0700`). It must be owned by your Linux user and must not be a symlink.
+(`0700`). It must be owned by your current user and must not be a symlink.
 
 To change it, use the **same absolute path** for setup and the MCP server:
 
@@ -320,6 +335,11 @@ Removing the bridge does not require removing Aseprite or Codex.
 
 ## Development
 
+Install Node.js 22 or newer, npm, Aseprite, and Codex CLI as listed above, then
+run `npm ci`. The server runs directly from JavaScript source; no build step is
+required. `npm start` starts the MCP stdio server, which normally runs under
+Codex through the registration in the quick start.
+
 ```text
 aseprite-codex-bridge/
 ├── src/
@@ -358,7 +378,7 @@ exports under `artifacts/`, and leaves the test sprite open. It does not edit
 existing documents. Re-run `npm run setup` after modifying Lua source so the
 installed scripts match your checkout.
 
-When reporting a problem, include your Linux distribution, Aseprite version and
+When reporting a problem, include your macOS version or Linux distribution, Aseprite version and
 installation method, Node version, the tool or command that failed, and the
 exact error. A redacted `aseprite_status` result can help identify path problems.
 

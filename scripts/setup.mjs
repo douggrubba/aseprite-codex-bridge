@@ -6,11 +6,13 @@ import { Bridge, projectDir } from '../src/bridge.mjs';
 const bridge = new Bridge();
 await bridge.init();
 const home = os.homedir();
-const configs = [path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'aseprite')];
-for (const candidate of [
+const configs = [process.platform === 'darwin'
+  ? path.join(home, 'Library/Application Support/Aseprite')
+  : path.join(process.env.XDG_CONFIG_HOME || path.join(home, '.config'), 'aseprite')];
+for (const candidate of process.platform === 'linux' ? [
   path.join(home, 'snap/steam/common/.config/aseprite'),
   path.join(home, '.var/app/com.valvesoftware.Steam/config/aseprite'),
-]) {
+] : []) {
   try { await fs.access(candidate); configs.push(candidate); } catch {}
 }
 for (const config of new Set(configs)) {
