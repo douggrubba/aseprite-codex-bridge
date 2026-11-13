@@ -6,6 +6,7 @@ end
 assert(app.isUIAvailable, 'Start this script in the Aseprite GUI.')
 local directory = app.fs.joinPath(app.fs.filePath(debug.getinfo(1, 'S').source:sub(2)), 'codex-bridge-support')
 local core = dofile(app.fs.joinPath(directory, 'core.lua'))
+local assistant = dofile(app.fs.joinPath(directory, 'assistant.lua'))
 local config = core.read(app.fs.joinPath(directory, 'config.json'))
 local root = config.directory
 assert(app.fs.isDirectory(root), 'Run npm run setup first.')
@@ -16,31 +17,22 @@ if previous and os.time() - previous.time < 5 then
   app.alert('Another Aseprite window already owns the Codex bridge. Disconnect it first.')
   return
 end
-local timer, dialog
+local timer, dialog, panel
 local function stop()
+  if panel then pcall(panel.cancel) end
   if timer then timer:stop() end
   local ok, heartbeat = pcall(core.read, app.fs.joinPath(root, 'heartbeat.json'))
   if ok and heartbeat.session == session then os.remove(app.fs.joinPath(root, 'heartbeat.json')) end
   _G.codexBridge = nil
 end
--- Esc closes non-modal dialogs and Enter presses a focused button, so closing the
--- dialog only hides it; the bridge stops when Disconnect is clicked. Running the
--- script again shows the dialog (see the _G.codexBridge check above).
-local disconnecting = false
-dialog = Dialog{ title='Codex bridge', onclose=function()
-  if disconnecting then stop() end
-end }
-dialog:label{ id='status', text='Connected — ready for Codex' }
-dialog:label{ text='Closing this window keeps the bridge running.' }
-dialog:button{ text='Disconnect', focus=false, onclick=function()
-  disconnecting = true
-  dialog:close()
-end }
+panel = assistant.create(core, root, session, stop)
+dialog = panel.dialog
 local function tick()
   core.write(app.fs.joinPath(root, 'heartbeat.json'), {session=session, time=os.time(), version=tostring(app.version)})
   for _, name in ipairs(app.fs.listFiles(root)) do
     if name:match('^job%-') then core.process(app.fs.joinPath(root, name), session) end
   end
+  panel.tick(true)
 end
 -- A tick can open a modal dialog (Aseprite's script file-access prompt), and the
 -- timer keeps firing inside it. Skip ticks while one is still running so they

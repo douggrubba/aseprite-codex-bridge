@@ -21,6 +21,7 @@ for (const config of new Set(configs)) {
   await fs.mkdir(support, {recursive:true});
   await fs.copyFile(path.join(projectDir, 'aseprite/codex-bridge.lua'), path.join(scripts, 'codex-bridge.lua'));
   await fs.copyFile(path.join(projectDir, 'aseprite/core.lua'), path.join(support, 'core.lua'));
+  await fs.copyFile(path.join(projectDir, 'aseprite/assistant.lua'), path.join(support, 'assistant.lua'));
   await fs.writeFile(path.join(support, 'config.json'), JSON.stringify({directory:bridge.root}, null, 2));
   console.log(`Installed: ${path.join(scripts, 'codex-bridge.lua')}`);
 }
