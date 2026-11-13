@@ -13,7 +13,7 @@ export const defaultRoot = path.join(os.homedir(), 'aseprite-bridge-data');
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const missing = error => error.code === 'ENOENT';
 
-async function readHeartbeat(root) {
+export async function readHeartbeat(root) {
   for (let attempt = 0; ; attempt++) {
     try { return JSON.parse(await fs.readFile(path.join(root, 'heartbeat.json'), 'utf8')); }
     catch (error) {
@@ -53,9 +53,11 @@ export async function findAseprite() {
 }
 
 export class Bridge {
-  constructor({ root = process.env.ASEPRITE_BRIDGE_DIR || defaultRoot, timeout = 15000 } = {}) {
+  constructor({ root = process.env.ASEPRITE_BRIDGE_DIR || defaultRoot, timeout = 15000,
+    session = process.env.ASEPRITE_BRIDGE_SESSION } = {}) {
     this.root = path.resolve(root);
     this.timeout = timeout;
+    this.session = session;
     this.tail = Promise.resolve();
   }
 
@@ -100,6 +102,7 @@ export class Bridge {
         catch { throw new Error('Live bridge is offline. Run File > Scripts > codex-bridge in Aseprite.'); }
         if (Date.now() / 1000 - heartbeat.time >= 5) throw new Error('Live bridge is offline or busy. Open its connection dialog and try again.');
         session = heartbeat.session;
+        if (this.session && session !== this.session) throw new Error('The Aseprite connection changed. Send a new request from the panel.');
       }
       const request = { ...payload, id: randomUUID(), session, expires: Math.ceil((Date.now() + this.timeout) / 1000) };
       await fs.writeFile(path.join(job, 'request.tmp'), JSON.stringify(request), { mode: 0o600 });

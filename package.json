@@ -8,6 +8,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "setup": "node scripts/setup.mjs",
+    "assistant": "node src/assistant.mjs",
     "test": "node --test test/*.test.mjs"
   },
   "dependencies": { "@modelcontextprotocol/sdk": "^1.0.0", "zod": "^3.25.0" }
