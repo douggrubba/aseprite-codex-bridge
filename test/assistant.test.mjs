@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { AssistantWorker } from '../src/assistant.mjs';
 import { discoverCodexSettings } from '../src/codex-settings.mjs';
+import { maxReferences, prepareReferences } from '../src/references.mjs';
 import { Bridge, projectDir } from '../src/bridge.mjs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -41,6 +42,125 @@ console.log(JSON.stringify({type:'turn.completed'}));`}
   return { root, worker, job, request };
 }
 const read = async file => JSON.parse(await fs.readFile(file, 'utf8'));
+const referencePng = () => fs.readFile(path.join(projectDir, 'docs/images/assistant-panel.png'));
+
+test('style references are snapshotted and attached to both fresh and resumed turns', async t => {
+  const { root, worker, job, request } = await fixture(t);
+  const directory=path.join(root, 'style refs with spaces');
+  await fs.mkdir(directory);
+  const png=await referencePng();
+  await fs.writeFile(path.join(directory, 'b.png'), png);
+  await fs.writeFile(path.join(directory, 'a.PNG'), png);
+  await fs.writeFile(path.join(directory, 'notes.txt'), 'not an image');
+  await fs.writeFile(path.join(job, 'request.json'), JSON.stringify({ ...request, reference_dir:directory }));
+  await worker.tick();
+  let call=await read(path.join(root, 'invocation.json'));
+  let images=call.args.flatMap((arg,index)=>arg==='--image' ? [call.args[index+1]] : []);
+  assert.equal(images.length,2);
+  assert.ok(call.prompt.includes('["a.PNG","b.png"]'));
+  assert.ok(call.prompt.includes('palette, outlines, shading'));
+  assert.deepEqual(await fs.readFile(images[0]),png);
+  await fs.unlink(path.join(directory,'a.PNG'));
+  await fs.unlink(path.join(directory,'b.png'));
+  assert.deepEqual(await fs.readFile(images[0]),png, 'attachments survive changes to the source folder');
+  await fs.writeFile(path.join(directory,'new-style.png'),png);
+  const nextJob=path.join(root,'assistant-job-followup');
+  await fs.mkdir(nextJob);
+  await fs.writeFile(path.join(nextJob,'request.json'),JSON.stringify({...request,thread_id:'thread-123',reference_dir:directory}));
+  await worker.tick();
+  call=await read(path.join(root,'invocation.json'));
+  images=call.args.flatMap((arg,index)=>arg==='--image' ? [call.args[index+1]] : []);
+  assert.equal(images.length,1);
+  assert.ok(call.args.indexOf('--image')>call.args.indexOf('resume'));
+  assert.ok(call.prompt.includes('["new-style.png"]'));
+  assert.ok(!call.prompt.includes('b.png'));
+  const clearedJob=path.join(root,'assistant-job-without-references');
+  await fs.mkdir(clearedJob);
+  await fs.writeFile(path.join(clearedJob,'request.json'),JSON.stringify({...request,thread_id:'thread-123'}));
+  await worker.tick();
+  call=await read(path.join(root,'invocation.json'));
+  assert.ok(!call.args.includes('--image'));
+  assert.ok(call.prompt.includes('rather than any older reference attachments'));
+});
+
+test('reference folders use a bounded, sorted set of direct images', async t => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'aseprite-references-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const directory=path.join(root,'source'), job=path.join(root,'job');
+  await fs.mkdir(directory); await fs.mkdir(job);
+  const png=await referencePng();
+  for(let i=maxReferences;i>=0;i--) await fs.writeFile(path.join(directory,`${String(i).padStart(2,'0')}.png`),png);
+  await fs.mkdir(path.join(directory,'nested'));
+  await fs.writeFile(path.join(directory,'nested','ignored.png'),png);
+  const refs=await prepareReferences(directory,job);
+  assert.equal(refs.total,maxReferences+1);
+  assert.equal(refs.images.length,maxReferences);
+  assert.equal(refs.images[0].name,'00.png');
+  assert.equal(refs.images.at(-1).name,`${String(maxReferences-1).padStart(2,'0')}.png`);
+});
+
+test('invalid reference folders or images fail before Codex starts', async t => {
+  const { root,worker,job,request }=await fixture(t);
+  const directory=path.join(root,'invalid-refs');
+  await fs.mkdir(directory);
+  for(const reference_dir of ['relative/path',path.join(root,'missing'),directory]) {
+    await fs.writeFile(path.join(job,'request.json'),JSON.stringify({...request,reference_dir}));
+    await worker.tick();
+    assert.equal((await read(path.join(job,'response.json'))).ok,false);
+  }
+  await fs.writeFile(path.join(directory,'bad.png'),'this is not a PNG');
+  await fs.writeFile(path.join(job,'request.json'),JSON.stringify({...request,reference_dir:directory}));
+  await worker.tick();
+  assert.match((await read(path.join(job,'response.json'))).error,/not a valid PNG/);
+  await assert.rejects(fs.access(path.join(root,'invocation.json')),{code:'ENOENT'});
+});
+
+test('the folder browser navigates and accepts a directory inside Aseprite', async t => {
+  const root=await fs.mkdtemp(path.join(os.tmpdir(),'aseprite-folder-picker-'));
+  t.after(()=>fs.rm(root,{recursive:true,force:true}));
+  const nested=path.join(root,'nested');
+  await fs.mkdir(nested);
+  await fs.writeFile(path.join(root,'reference.png'),await referencePng());
+  const result=await new Bridge({root}).request({op:'run',transaction:false,code:`
+    local refs=dofile(${JSON.stringify(path.join(projectDir,'aseprite/references.lua'))})
+    local root=${JSON.stringify(root)}
+    local widgets,data={},{}
+    local nativeDialog=Dialog
+    Dialog=function()
+      local dlg={data=data}
+      for _,method in ipairs({'label','entry','button','combobox'}) do
+        dlg[method]=function(self,widget)
+          if widget.id then widgets[widget.id]=widget;data[widget.id]=widget.option or widget.text or '' end
+          return self
+        end
+      end
+      dlg.newrow=function(self) return self end
+      dlg.modify=function(self,widget)
+        if widget.text then data[widget.id]=widget.text end
+        if widget.option then data[widget.id]=widget.option end
+      end
+      dlg.close=function(self) self.closed=true end
+      dlg.show=function(self)
+        assert(data.path == root)
+        data.folders='nested';widgets.open.onclick()
+        assert(data.path == ${JSON.stringify(nested)})
+        widgets.up.onclick();assert(data.path == root)
+        data.path=${JSON.stringify(nested)}
+        widgets.use_folder.onclick()
+        assert(self.closed)
+      end
+      return dlg
+    end
+    local selected=refs.choose(root,nil)
+    Dialog=nativeDialog
+    local folders,count=refs.scan(root)
+    return {selected=selected,count=count,folders=folders,summary=refs.summary(9)}
+  `},'batch');
+  assert.equal(result.data.result.selected,nested);
+  assert.equal(result.data.result.count,1);
+  assert.ok(result.data.result.folders.includes('nested'));
+  assert.match(result.data.result.summary,/first 8 of 9/);
+});
 
 test('model discovery reads CLI defaults and paginated capabilities without starting a turn', async t => {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aseprite-models-'));
@@ -215,7 +335,8 @@ test('panel Lua submits current context, retains target across tab changes, and 
     end
     local s = Sprite(8,8)
     local original = s.id
-    core.write(app.fs.joinPath(root,'assistant-heartbeat.json'), {time=os.time(), settings_version=1})
+    core.write(app.fs.joinPath(root,'assistant-heartbeat.json'), {time=os.time(), settings_version=1, references_version=1})
+    core.write(app.fs.joinPath(root,'assistant-preferences.json'), {reference_dir=${JSON.stringify(path.join(projectDir, 'docs/images'))}})
     core.write(app.fs.joinPath(root,'assistant-settings.json'), json.decode([==[${JSON.stringify(settings)}]==]))
     local disconnected=0
     local panel = assistant.create(core, root, 'editor', function() disconnected=disconnected+1 end)
@@ -241,7 +362,7 @@ test('panel Lua submits current context, retains target across tab changes, and 
     stopped=data.activity:match('^Stopping') ~= nil and data.status:match('^Stopping') ~= nil
     local other=Sprite(4,4)
     panel.tick()
-    local pinned=panel.pending.sprite_id == original and not widgets.undo.enabled and not widgets.model.enabled and not widgets.effort.enabled
+    local pinned=panel.pending.sprite_id == original and not widgets.undo.enabled and not widgets.model.enabled and not widgets.effort.enabled and not widgets.browse_refs.enabled and not widgets.clear_refs.enabled
     core.write(app.fs.joinPath(pending.job,'response.json'), {ok=true, message='Done', thread_id='thread-123'})
     panel.tick()
     local consumed=panel.pending == nil and panel.threads[original] == 'thread-123' and data.activity == ''
@@ -252,10 +373,14 @@ test('panel Lua submits current context, retains target across tab changes, and 
     local explicitDisconnect=disconnected == 1
     local reopened=assistant.create(core, root, 'editor', function() end)
     local remembered=reopened.dialog.data.model == 'test-model-b' and reopened.dialog.data.effort == 'medium'
+    local rememberedReferences=reopened.dialog.data.reference_dir:match('docs/images') ~= nil
+    widgets.clear_refs.onclick()
+    local clearedReferences=core.read(app.fs.joinPath(root,'assistant-preferences.json')).reference_dir == '' and reopened.dialog.data.reference_dir == 'None'
     Dialog=nativeDialog
     return {sendEnabled=sendEnabled, pinned=pinned, consumed=consumed, working=working, stopped=stopped,
       defaults=defaults, resetEffort=resetEffort, remembered=remembered, model=request.model, effort=request.effort,
       closeKeepsRunning=closeKeepsRunning, explicitDisconnect=explicitDisconnect,
+      references=request.reference_dir, rememberedReferences=rememberedReferences, clearedReferences=clearedReferences,
       submitted=request.prompt, target=request.sprite_id, original=original,
       selectionEmpty=request.context.selection.empty, response=panel.response}
   ` }, 'batch');
@@ -269,6 +394,9 @@ test('panel Lua submits current context, retains target across tab changes, and 
   assert.equal(result.data.result.remembered, true);
   assert.equal(result.data.result.closeKeepsRunning, true);
   assert.equal(result.data.result.explicitDisconnect, true);
+  assert.equal(result.data.result.references,path.join(projectDir,'docs/images'));
+  assert.equal(result.data.result.rememberedReferences,true);
+  assert.equal(result.data.result.clearedReferences,true);
   assert.equal(result.data.result.model, 'test-model-b');
   assert.equal(result.data.result.effort, 'medium');
   assert.equal(result.data.result.target, result.data.result.original);

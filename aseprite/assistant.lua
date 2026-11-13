@@ -1,5 +1,7 @@
 -- Native UI for the existing live bridge. Codex itself runs in the Node helper.
 local M = {}
+local directory = app.fs.filePath(debug.getinfo(1, 'S').source:sub(2))
+local references = dofile(app.fs.joinPath(directory, 'references.lua'))
 
 function M.create(core, root, session, disconnect)
   local panel = { threads={}, pending=nil, response='' }
@@ -35,6 +37,8 @@ function M.create(core, root, session, disconnect)
   end
   local models, catalog, settingsSignature = {}, nil, nil
   local preferences = read('assistant-preferences.json') or {}
+  local referenceDir = type(preferences.reference_dir) == 'string' and preferences.reference_dir or ''
+  local referenceError
   local updatingSettings, lastSettingsCheck = false, nil
   local function includes(items, value)
     for _, item in ipairs(items) do if item == value then return true end end
@@ -57,8 +61,20 @@ function M.create(core, root, session, disconnect)
   end
   local function rememberSettings()
     local ok, err = pcall(core.write, app.fs.joinPath(root, 'assistant-preferences.json'),
-      {model=dialog.data.model, effort=dialog.data.effort})
+      {model=dialog.data.model, effort=dialog.data.effort, reference_dir=referenceDir})
     if not ok then message('Could not remember settings: ' .. tostring(err)) end
+  end
+  local function updateReferences()
+    referenceError = nil
+    modify('reference_dir', referenceDir ~= '' and shorten(referenceDir, 55) or 'None')
+    if referenceDir == '' then
+      modify('reference_info', 'PNG, JPEG, WebP — up to ' .. references.limit .. ' images')
+      return
+    end
+    local ok, folders, count = pcall(references.scan, referenceDir)
+    if not ok then referenceError=tostring(folders)
+    elseif count == 0 then referenceError='No PNG, JPEG, or WebP images in this folder.' end
+    modify('reference_info', referenceError and shorten(referenceError, 65) or references.summary(count))
   end
   local function refreshSettings()
     if lastSettingsCheck == os.time() then return end
@@ -108,6 +124,14 @@ function M.create(core, root, session, disconnect)
   local function submit()
     if panel.pending or not app.sprite or not available() then return end
     local helper = read('assistant-heartbeat.json')
+    if referenceDir ~= '' then
+      if not helper or helper.references_version ~= 1 then
+        message('Restart the helper to use style reference images.')
+        return
+      end
+      updateReferences()
+      if referenceError then message(referenceError); return end
+    end
     if models[dialog.data.model] and (not helper or helper.settings_version ~= 1) then
       message('Restart the helper to use the selected model and effort.')
       return
@@ -126,6 +150,7 @@ function M.create(core, root, session, disconnect)
         layer=app.layer and app.layer.name or '', thread_id=panel.threads[sprite.id],
         model=models[dialog.data.model] and dialog.data.model or nil,
         effort=models[dialog.data.model] and #models[dialog.data.model].efforts > 0 and dialog.data.effort or nil,
+        reference_dir=referenceDir ~= '' and referenceDir or nil,
         context={ sprite=core.describe(sprite), selection={ empty=sprite.selection.isEmpty,
           x=bounds.x, y=bounds.y, width=bounds.width, height=bounds.height } }
       })
@@ -157,6 +182,22 @@ function M.create(core, root, session, disconnect)
     end }
   dialog:newrow()
   dialog:label{ id='model_note', text='Start the helper to choose a model' }
+  dialog:newrow()
+  dialog:label{ id='reference_dir', label='Style refs:', text='None' }
+  dialog:newrow()
+  dialog:button{ id='browse_refs', text='Choose folder...', onclick=function()
+    local ok, selected = pcall(references.choose, referenceDir, dialog)
+    if not ok then message(tostring(selected)); return end
+    if selected then referenceDir=selected; updateReferences(); rememberSettings(); panel.tick() end
+  end }
+  dialog:button{ id='clear_refs', text='Clear references', onclick=function()
+    referenceDir=''
+    updateReferences()
+    rememberSettings()
+    panel.tick()
+  end }
+  dialog:newrow()
+  dialog:label{ id='reference_info', text='' }
   dialog:newrow()
   dialog:entry{ id='prompt', label='Instruction:', text='', focus=true,
     onchange=function() panel.tick() end }
@@ -262,9 +303,12 @@ function M.create(core, root, session, disconnect)
     dialog:modify{ id='new', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='undo', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='redo', enabled=not busy and sprite ~= nil }
+    dialog:modify{ id='browse_refs', enabled=not busy }
+    dialog:modify{ id='clear_refs', enabled=not busy and referenceDir ~= '' }
     if not busy then modify('status', available() and 'Ready — describe a change above' or 'Start the helper with npm run assistant') end
   end
   panel.dialog = dialog
+  updateReferences()
   panel.tick()
   return panel
 end

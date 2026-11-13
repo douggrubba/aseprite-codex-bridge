@@ -23,6 +23,7 @@ Both interfaces use the same live Aseprite connection and editing operations.
 
 - **Ask beside the canvas.** Enter an instruction and continue the conversation for each open sprite.
 - **Choose how Codex works.** Select a model and a supported reasoning effort; your selections are remembered.
+- **Use your own style references.** Choose a folder of reference images to guide palette, outlines, shading, and perspective.
 - **See when it is working.** An animated pixel spinner, elapsed time, and progress messages show an active request.
 - **Review and revise.** Read the response, inspect the live result, and use Aseprite's Undo / Redo history.
 - **Work on unsaved artwork.** Requests use the document open in the editor and stay pinned to its sprite ID.
@@ -158,6 +159,33 @@ Restart `npm run assistant` to refresh the list after changing accounts or CLI
 configuration. If discovery fails, the controls show **CLI default** and requests
 continue using Codex's existing settings. The model shown in the screenshots is
 an example from the account used for that session; your list may differ.
+
+### Style reference images
+
+Under **Style refs**, click **Choose folder...**. The native folder browser lets
+you open subfolders, go **Up**, or paste an absolute path and press **Go**. Click
+**Use this folder** to select it. The panel remembers the folder when reopened.
+
+PNG, JPEG, and WebP images directly inside that folder are attached to each
+instruction, including follow-ups. Subfolders are not included. The helper uses
+up to **8 images in filename order** and the panel reports when more are present.
+Use a small, consistent set of examples; prefix filenames if you want to control
+which images are included. Each image must be at most 10 MB, with 40 MB total.
+
+For example:
+
+> Add a small bakery on a new layer. Use the reference images' warm palette, dark outlines, and roof shading.
+
+The helper copies the selected references into the request's temporary directory
+and attaches those snapshots to Codex. Codex receives instructions to study their
+palette, outlines, shading, texture, pixel scale, and perspective. Reference
+images are sent as model input; they guide the edit, and visual consistency still
+needs review on the canvas.
+
+**Clear references** removes the folder selection for future requests. Changing
+folders replaces the active reference set on the next turn. Folder controls are
+disabled while a request is running. After upgrading, restart the helper and
+reopen the panel to enable this feature.
 
 ### Stop, undo, and save
 
@@ -471,11 +499,13 @@ aseprite-codex-bridge/
 │   ├── server.mjs          # MCP tools, validation, and image responses
 │   ├── bridge.mjs          # Executable detection, queue, and process management
 │   ├── assistant.mjs       # In-app request queue and background Codex runner
-│   └── codex-settings.mjs  # CLI model discovery and effective defaults
+│   ├── codex-settings.mjs  # CLI model discovery and effective defaults
+│   └── references.mjs      # Reference selection, validation, and snapshots
 ├── aseprite/
 │   ├── codex-bridge.lua    # Live connection dialog and polling timer
 │   ├── core.lua           # Shared Aseprite operations
 │   ├── assistant.lua      # Native instruction panel and request context
+│   ├── references.lua     # Native folder browser for style references
 │   └── batch.lua          # Batch entry point
 ├── scripts/
 │   ├── setup.mjs          # Install the Lua scripts

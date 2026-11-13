@@ -5,6 +5,7 @@ import { createInterface } from 'node:readline';
 import { pathToFileURL } from 'node:url';
 import { Bridge, projectDir, readHeartbeat } from './bridge.mjs';
 import { discoverCodexSettings } from './codex-settings.mjs';
+import { prepareReferences } from './references.mjs';
 
 const missing = error => error.code === 'ENOENT';
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -17,7 +18,7 @@ async function write(file, value) {
   await fs.rename(`${file}.tmp`, file);
 }
 
-export function codexArgs(request, root) {
+export function codexArgs(request, root, references = []) {
   // Argument arrays and stdin keep user instructions out of the shell.
   const config = {
     approval_policy: 'never', sandbox_mode: 'read-only',
@@ -32,11 +33,18 @@ export function codexArgs(request, root) {
   for (const [key, value] of Object.entries(config)) args.push('-c', `${key}=${JSON.stringify(value)}`);
   if (request.thread_id) args.push('resume', request.thread_id);
   if (request.model) args.push('--model', request.model);
+  for (const reference of references) args.push('--image', reference.path);
   args.push('-');
   return args;
 }
 
-export function instruction(request) {
+export function instruction(request, references = []) {
+  const style = references.length
+    ? `The ${references.length} attached images are the active style references for this turn, replacing earlier reference sets.
+Study their palette, outlines, shading, texture, pixel scale, and perspective, and use those features to guide the requested edit.
+Follow the user's instruction for content and preserve the existing artwork's structure unless asked to change it.
+Attachment order: ${JSON.stringify(references.map(image => image.name))}`
+    : 'No style references are attached for this turn. Follow the current sprite style rather than any older reference attachments.';
   return `You are the assistant inside Aseprite. Use the aseprite MCP tools to carry out the user's edit.
 The target is live sprite ID ${request.sprite_id}, frame ${request.frame}, layer ${JSON.stringify(request.layer)}.
 Always inspect and preview this sprite before editing. Always pass sprite_id=${request.sprite_id}.
@@ -46,6 +54,7 @@ Keep edits undoable: use transactions and clone cel images before changing pixel
 Respect the selection described below when the user refers to it; do not assume it is still unchanged.
 Do not retry a timed-out edit. Inspect first and report uncertainty if its outcome is unknown.
 Preview the result when done. Respond with a brief plain-text description of the change.
+${style}
 Context at submission: ${JSON.stringify(request.context)}
 User instruction: ${request.prompt}`;
 }
@@ -84,7 +93,7 @@ export class AssistantWorker {
   }
 
   async heartbeat() {
-    await write(path.join(this.root, 'assistant-heartbeat.json'), { time: Date.now() / 1000, pid: process.pid, settings_version: 1 });
+    await write(path.join(this.root, 'assistant-heartbeat.json'), { time: Date.now() / 1000, pid: process.pid, settings_version: 1, references_version: 1 });
   }
 
   async tick() {
@@ -120,15 +129,18 @@ export class AssistantWorker {
             throw new Error('Selected effort is not supported by this model.');
           }
         }
-        result = await this.run(request, job);
+        const references = await prepareReferences(request.reference_dir, job);
+        if (this.stopped || await read(path.join(job, 'cancel.json'))) throw new Error('Request cancelled before starting.');
+        result = await this.run(request, job, references);
       } catch (error) { result = { ok: false, error: error.message }; }
       await write(path.join(job, 'response.json'), result);
     }
   }
 
-  async run(request, job) {
-    await write(path.join(job, 'progress.json'), { text: 'Codex is starting...' });
-    const child = this.spawnProcess(this.command, codexArgs(request, this.root), {
+  async run(request, job, references = { images: [], total: 0 }) {
+    await write(path.join(job, 'progress.json'), { text: references.images.length
+      ? `Codex is starting with ${references.images.length} of ${references.total} style references...` : 'Codex is starting...' });
+    const child = this.spawnProcess(this.command, codexArgs(request, this.root, references.images), {
       cwd: projectDir, env: process.env, detached: true, stdio: ['pipe', 'pipe', 'pipe'],
     });
     this.child = child;
@@ -157,7 +169,7 @@ export class AssistantWorker {
     });
     child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-8000); });
     child.stdin.on('error', () => {}); // Startup failure can close stdin early.
-    child.stdin.end(instruction(request));
+    child.stdin.end(instruction(request, references.images));
     const started = Date.now();
     let checking = false;
     const monitor = setInterval(async () => {
