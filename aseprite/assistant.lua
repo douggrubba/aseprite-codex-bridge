@@ -2,10 +2,11 @@
 local M = {}
 local directory = app.fs.filePath(debug.getinfo(1, 'S').source:sub(2))
 local references = dofile(app.fs.joinPath(directory, 'references.lua'))
+local textarea = dofile(app.fs.joinPath(directory, 'textarea.lua'))
 
 function M.create(core, root, session, disconnect)
   local panel = { threads={}, pending=nil, response='' }
-  local dialog
+  local dialog, promptEditor
   local spinnerFrame = 0
   local spinnerDots = {{7,1}, {11,3}, {13,7}, {11,11}, {7,13}, {3,11}, {1,7}, {3,3}}
   local function read(name)
@@ -136,7 +137,7 @@ function M.create(core, root, session, disconnect)
       message('Restart the helper to use the selected model and effort.')
       return
     end
-    local prompt = dialog.data.prompt:match('^%s*(.-)%s*$')
+    local prompt = promptEditor:getText():match('^%s*(.-)%s*$')
     if #prompt == 0 then return end
     if #prompt > 8000 then message('Keep the instruction under 8000 characters.'); return end
     local sprite = app.sprite
@@ -158,7 +159,7 @@ function M.create(core, root, session, disconnect)
     if not ok then message('Could not send instruction: ' .. tostring(err)); return end
     panel.pending = { job=job, sprite_id=sprite.id, started=os.time() }
     spinnerFrame = 0
-    modify('prompt', '')
+    promptEditor:setText('')
     message('')
     modify('status', 'Waiting for Codex...')
     panel.tick()
@@ -199,8 +200,9 @@ function M.create(core, root, session, disconnect)
   dialog:newrow()
   dialog:label{ id='reference_info', text='' }
   dialog:newrow()
-  dialog:entry{ id='prompt', label='Instruction:', text='', focus=true,
-    onchange=function() panel.tick() end }
+  promptEditor = textarea.add(dialog, {id='prompt', label='Instruction:',
+    onchange=function() panel.tick() end,
+    onlimit=function() message('Keep the instruction under 8000 characters.') end})
   dialog:newrow()
   dialog:button{ id='send', text='Send', enabled=false, onclick=submit }
   dialog:button{ id='cancel', text='Stop', enabled=false, onclick=panel.cancel }
@@ -298,7 +300,7 @@ function M.create(core, root, session, disconnect)
     local target = busy and ('Editing sprite #' .. panel.pending.sprite_id) or
       (sprite and (app.fs.fileName(sprite.filename) ~= '' and app.fs.fileName(sprite.filename) or 'Untitled') .. ' (#' .. sprite.id .. ')' or 'Open a sprite to begin')
     modify('target', shorten(target, 55))
-    dialog:modify{ id='send', enabled=not busy and sprite ~= nil and available() and dialog.data.prompt:match('%S') ~= nil }
+    dialog:modify{ id='send', enabled=not busy and sprite ~= nil and available() and promptEditor:getText():match('%S') ~= nil }
     dialog:modify{ id='cancel', enabled=busy }
     dialog:modify{ id='new', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='undo', enabled=not busy and sprite ~= nil }

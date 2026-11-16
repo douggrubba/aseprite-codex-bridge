@@ -125,7 +125,9 @@ looking at the artwork while you ask for changes.
 
 ### The editing loop
 
-1. **Describe the edit.** The single-line instruction field accepts your request for the open sprite.
+1. **Describe the edit.** The multiline instruction area accepts your request for the open sprite.
+   Text wraps as you type; **Enter** adds a new line. Click **Send** when ready.
+   Use the usual copy, paste, select-all, and text undo shortcuts; scroll to review longer requests.
 2. **Send it.** A rotating pixel spinner and elapsed-time counter stay active while
    Codex works. Progress messages identify tool activity as it inspects and edits.
 3. **Review the canvas.** The response appears in the panel; **Read response** opens the full message.
@@ -197,9 +199,8 @@ several undo steps.
 Save with Aseprite's usual commands. Avoid overlapping CLI edits or manual drawing
 on the same sprite while a request is running.
 
-The helper currently starts manually in a terminal. The instruction field is a
-single line. The panel can be hidden while live requests continue; run the script
-again to show it. More editing
+The helper currently starts manually in a terminal. The panel can be hidden
+while live requests continue; run the script again to show it. More editing
 buttons and sliders can be added to the same UI module.
 
 ## Example artwork
@@ -506,6 +507,7 @@ aseprite-codex-bridge/
 │   ├── core.lua           # Shared Aseprite operations
 │   ├── assistant.lua      # Native instruction panel and request context
 │   ├── references.lua     # Native folder browser for style references
+│   ├── textarea.lua       # Multiline instruction editor
 │   └── batch.lua          # Batch entry point
 ├── scripts/
 │   ├── setup.mjs          # Install the Lua scripts

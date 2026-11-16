@@ -348,7 +348,9 @@ test('panel Lua submits current context, retains target across tab changes, and 
     data.model='test-model-b'
     widgets.model.onchange()
     local resetEffort=data.effort == 'medium' and #widgets.effort.options == 3
-    data.prompt='Add a highlight'
+    widgets.prompt.onkeydown{code='KeyA', key='Add a highlight', stopPropagation=function() end}
+    widgets.prompt.onkeydown{code='Enter', stopPropagation=function() end}
+    widgets.prompt.onkeydown{code='KeyP', key='Preserve the palette.', stopPropagation=function() end}
     panel.tick()
     local sendEnabled=widgets.send.enabled
     widgets.send.onclick()
@@ -401,8 +403,87 @@ test('panel Lua submits current context, retains target across tab changes, and 
   assert.equal(result.data.result.effort, 'medium');
   assert.equal(result.data.result.target, result.data.result.original);
   assert.equal(result.data.result.selectionEmpty, true);
-  assert.equal(result.data.result.submitted, 'Add a highlight');
+  assert.equal(result.data.result.submitted, 'Add a highlight\nPreserve the palette.');
   assert.equal(result.data.result.response, 'Done');
+});
+
+test('multiline editor wraps, scrolls, edits Unicode, and handles clipboard and text undo', async t => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'aseprite-textarea-'));
+  t.after(() => fs.rm(root, { recursive: true, force: true }));
+  const result = await new Bridge({root}).request({op:'run', transaction:false, code:`
+    local clipboard = {text='warm\\r\\nroofs'}
+    local textarea = loadfile(${JSON.stringify(path.join(projectDir, 'aseprite/textarea.lua'))}, 't',
+      setmetatable({app={clipboard=clipboard}}, {__index=_G}))()
+    local widget, drawn, changes, limits = nil, {}, 0, 0
+    local gc = {width=70, height=38, theme={color={text=Color(255), window_face=Color(0)}}}
+    gc.measureText = function(self, text) return {width=utf8.len(text)*5, height=8} end
+    gc.fillRect = function(self, rect) assert(rect.width >= 0) end
+    gc.strokeRect = function() end
+    gc.fillText = function(self, text)
+      if self.color == self.theme.color.text then drawn[#drawn+1] = text end
+    end
+    local dialog = {}
+    dialog.canvas = function(self, value) widget=value end
+    dialog.repaint = function() drawn={}; widget.onpaint{context=gc} end
+    local editor = textarea.add(dialog, {id='test',
+      onchange=function() changes=changes+1 end, onlimit=function() limits=limits+1 end})
+    dialog:repaint()
+    local function key(code, text, control, shift)
+      local stopped=false
+      widget.onkeydown{code=code, key=text or '', ctrlKey=control, shiftKey=shift,
+        stopPropagation=function() stopped=true end}
+      return stopped
+    end
+    assert(key('KeyA', 'café'))
+    key('Enter')
+    key('KeyR', 'roofs')
+    assert(editor:getText() == 'café\\nroofs')
+    key('Home')
+    key('Backspace')
+    assert(editor:getText() == 'caféroofs')
+    key('KeyZ', '', true)
+    assert(editor:getText() == 'café\\nroofs')
+    key('KeyZ', '', true, true)
+    assert(editor:getText() == 'caféroofs')
+    key('Home')
+    key('ArrowRight'); key('ArrowRight'); key('ArrowRight'); key('Delete')
+    assert(editor:getText() == 'cafroofs', 'Unicode deletion must remove a whole character')
+    key('KeyA', '', true)
+    key('KeyV', '', true)
+    assert(editor:getText() == 'warm\\nroofs')
+    key('Home'); key('ArrowRight', '', false, true)
+    key('KeyC', '', true)
+    assert(clipboard.text == 'r')
+    key('KeyX', '', true)
+    assert(editor:getText() == 'warm\\noofs')
+    key('KeyA', '', true)
+    key('KeyV', '', true)
+    assert(editor:getText() == 'r')
+    editor:setText('one two three four five six seven eight nine ten')
+    assert(#drawn == 3 and drawn[#drawn]:match('ten$'), 'Typing must reveal the caret')
+    for _, line in ipairs(drawn) do assert(utf8.len(line) <= 11, 'Text must wrap within the canvas') end
+    widget.onwheel{deltaY=-100}
+    assert(drawn[1] == 'one two ')
+    widget.onmousedown{button=MouseButton.LEFT, x=4, y=4}
+    widget.onmousemove{x=19, y=4}
+    widget.onmouseup{}
+    key('KeyX', '', true)
+    assert(clipboard.text == 'one')
+    key('End', '', true)
+    key('ArrowUp')
+    key('KeyQ', '!')
+    assert(editor:getText():find('!', 1, true))
+    assert(not key('Tab') and not key('Escape'))
+    editor:setText(string.rep('a', 7999))
+    key('KeyE', 'é')
+    assert(#editor:getText() == 7999 and limits == 1, 'Oversized input must not split Unicode')
+    key('KeyA', '', true)
+    key('KeyX', '', true)
+    assert(editor:getText() == '')
+    return {changes=changes, limits=limits}
+  `}, 'batch');
+  assert.ok(result.data.result.changes > 10);
+  assert.equal(result.data.result.limits, 1);
 });
 
 test('panel MCP refuses other sprites and batch mode', async t => {
