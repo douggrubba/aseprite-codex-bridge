@@ -116,6 +116,21 @@ Press **Send**, watch the result on the canvas, then refine it:
 Review the canvas and response before saving. Save your document with Aseprite's
 usual commands. For CLI access as well, see [Use from Codex CLI](#use-from-codex-cli).
 
+### Export separate PNGs
+
+Click **Export...** beside Undo and Redo to export the visible layers of the
+current frame. Choose an output folder and filename prefix. **Separate objects**
+writes one tightly cropped, transparent PNG per disconnected object; pixels that
+touch, including diagonally, belong to one object. With an active selection,
+**Selected area** exports that area as one PNG and preserves its selection mask.
+**Whole image** is the default and exports one PNG at the full canvas size, including transparent
+margins, regardless of the active selection.
+Use a selection to keep disconnected details together or isolate touching artwork.
+
+Files are named `prefix-001.png`, `prefix-002.png`, and so on. Existing files are
+kept and their numbers skipped. Export remembers the output folder and is disabled
+while Codex is editing. It does not require the assistant helper to be running.
+
 ## In-app assistant
 
 ![Close-up of the native Codex assistant panel showing sprite, model, effort, instruction, response, and history controls](docs/images/assistant-panel.png)
@@ -168,11 +183,26 @@ Under **Style refs**, click **Choose folder...**. The native folder browser lets
 you open subfolders, go **Up**, or paste an absolute path and press **Go**. Click
 **Use this folder** to select it. The panel remembers the folder when reopened.
 
-PNG, JPEG, and WebP images directly inside that folder are attached to each
-instruction, including follow-ups. Subfolders are not included. The helper uses
-up to **8 images in filename order** and the panel reports when more are present.
-Use a small, consistent set of examples; prefix filenames if you want to control
-which images are included. Each image must be at most 10 MB, with 40 MB total.
+PNG, JPEG, and WebP images in that folder and its subfolders are attached to each
+instruction, including follow-ups. **Max images** is a slider that defaults to
+**8**; its range expands to the number of images in the folder. Until you choose
+specific images, the helper uses the first images in relative path order, up to
+that limit.
+
+Click **Select images...** to choose the exact references. The picker shows
+thumbnails on a checkerboard, supports filtering by relative filename and paging,
+and opens a larger view with **Preview focused image...**. Click thumbnails to
+select or deselect them, then click **Use selected images**. It enforces the
+current limit; **Cancel** leaves the saved selection unchanged. Lowering the
+slider trims a saved selection to the new limit. The folder, limit, and selection
+are remembered when the panel reopens. Choosing a different folder resets the
+selection to automatic path order.
+
+Nested images retain their relative folder paths in the attachment list, so
+identical filenames remain
+distinguishable. Use a small, consistent set of examples; prefix folder or
+filenames if you want to control which images are included. Each image must be
+at most 10 MB, with 40 MB total.
 
 For example:
 
@@ -185,7 +215,7 @@ images are sent as model input; they guide the edit, and visual consistency stil
 needs review on the canvas.
 
 **Clear references** removes the folder selection for future requests. Changing
-folders replaces the active reference set on the next turn. Folder controls are
+folders replaces the active reference set on the next turn. Reference controls are
 disabled while a request is running. After upgrading, restart the helper and
 reopen the panel to enable this feature.
 
@@ -507,6 +537,7 @@ aseprite-codex-bridge/
 │   ├── core.lua           # Shared Aseprite operations
 │   ├── assistant.lua      # Native instruction panel and request context
 │   ├── references.lua     # Native folder browser for style references
+│   ├── export.lua         # Separate-object and selection PNG export
 │   ├── textarea.lua       # Multiline instruction editor
 │   └── batch.lua          # Batch entry point
 ├── scripts/
