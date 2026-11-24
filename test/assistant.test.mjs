@@ -181,13 +181,19 @@ test('the folder browser navigates and accepts a directory inside Aseprite', asy
   const root=await fs.mkdtemp(path.join(os.tmpdir(),'aseprite-folder-picker-'));
   t.after(()=>fs.rm(root,{recursive:true,force:true}));
   const nested=path.join(root,'nested');
-  await fs.mkdir(nested);
+  await fs.mkdir(path.join(nested, 'deep'), { recursive: true });
   await fs.writeFile(path.join(root,'reference.png'),await referencePng());
   const result=await new Bridge({root}).request({op:'run',transaction:false,code:`
     local refs=dofile(${JSON.stringify(path.join(projectDir,'aseprite/references.lua'))})
     local root=${JSON.stringify(root)}
     local widgets,data={},{}
     local nativeDialog=Dialog
+    local nativeFS=app.fs
+    local listings={}
+    app.fs=setmetatable({listFiles=function(directory)
+      listings[#listings+1]=directory
+      return nativeFS.listFiles(directory)
+    end}, {__index=nativeFS})
     Dialog=function()
       local dlg={data=data}
       for _,method in ipairs({'label','entry','button','combobox'}) do
@@ -215,10 +221,12 @@ test('the folder browser navigates and accepts a directory inside Aseprite', asy
     end
     local selected=refs.choose(root,nil)
     Dialog=nativeDialog
+    app.fs=nativeFS
     local folders,count=refs.scan(root)
-    return {selected=selected,count=count,folders=folders,summary=refs.summary(9)}
+    return {selected=selected,listings=listings,count=count,folders=folders,summary=refs.summary(9)}
   `},'batch');
   assert.equal(result.data.result.selected,nested);
+  assert.deepEqual(result.data.result.listings,[root,nested,root,nested]);
   assert.equal(result.data.result.count,1);
   assert.ok(result.data.result.folders.includes('nested'));
   assert.match(result.data.result.summary,/first 8 of 9/);

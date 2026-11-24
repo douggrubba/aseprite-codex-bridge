@@ -222,7 +222,17 @@ function M.choose(initial, parent, options)
   if not app.fs.isDirectory(current) then current = app.fs.userDocsPath end
   local selected, dialog
   local function navigate(directory)
-    local ok, folders, count = pcall(M.scan, directory)
+    -- The picker can start at the home directory. Only list the current level on the UI thread.
+    local ok, folders = pcall(function()
+      assert(type(directory) == 'string' and directory:sub(1,1) == '/' and app.fs.isDirectory(directory),
+        'Choose an existing folder using an absolute path.')
+      local children = {}
+      for _, name in ipairs(app.fs.listFiles(directory)) do
+        if app.fs.isDirectory(app.fs.joinPath(directory, name)) then children[#children+1] = name end
+      end
+      table.sort(children)
+      return children
+    end)
     if not ok then dialog:modify{ id='info', text=tostring(folders) }; return false end
     current = app.fs.normalizePath(directory)
     if #current > 1 then current = current:gsub('/+$', '') end
@@ -230,7 +240,7 @@ function M.choose(initial, parent, options)
     dialog:modify{ id='folders', options=#folders > 0 and folders or {'(No subfolders)'}, option=folders[1] or '(No subfolders)' }
     dialog:modify{ id='open', enabled=#folders > 0 }
     dialog:modify{ id='up', enabled=current ~= '/' }
-    dialog:modify{ id='info', text=options.info or M.summary(count) }
+    dialog:modify{ id='info', text=options.info or '' }
     return true
   end
   dialog = Dialog{ title=options.title or 'Style reference folder', parent=parent }
