@@ -3,6 +3,7 @@ local M = {}
 local directory = app.fs.filePath(debug.getinfo(1, 'S').source:sub(2))
 local references = dofile(app.fs.joinPath(directory, 'references.lua'))
 local textarea = dofile(app.fs.joinPath(directory, 'textarea.lua'))
+local exporter = dofile(app.fs.joinPath(directory, 'export.lua'))
 
 function M.create(core, root, session, disconnect)
   local panel = { threads={}, pending=nil, response='' }
@@ -39,7 +40,16 @@ function M.create(core, root, session, disconnect)
   local models, catalog, settingsSignature = {}, nil, nil
   local preferences = read('assistant-preferences.json') or {}
   local referenceDir = type(preferences.reference_dir) == 'string' and preferences.reference_dir or ''
-  local referenceError
+  local referenceLimit = math.tointeger(tonumber(preferences.reference_limit)) or references.defaultLimit
+  if referenceLimit < 1 then referenceLimit=references.defaultLimit end
+  local referenceFiles
+  if type(preferences.reference_files)=='table' or type(preferences.reference_files)=='userdata' then
+    referenceFiles={}
+    for _,name in ipairs(preferences.reference_files) do referenceFiles[#referenceFiles+1]=name end
+    if #referenceFiles==0 then referenceFiles=nil end
+  end
+  local exportDir = type(preferences.export_directory) == 'string' and preferences.export_directory or ''
+  local referenceError, referenceCount, updatingReferences = nil, 0, false
   local updatingSettings, lastSettingsCheck = false, nil
   local function includes(items, value)
     for _, item in ipairs(items) do if item == value then return true end end
@@ -62,20 +72,34 @@ function M.create(core, root, session, disconnect)
   end
   local function rememberSettings()
     local ok, err = pcall(core.write, app.fs.joinPath(root, 'assistant-preferences.json'),
-      {model=dialog.data.model, effort=dialog.data.effort, reference_dir=referenceDir})
+      {model=dialog.data.model, effort=dialog.data.effort, reference_dir=referenceDir,
+        reference_limit=referenceLimit, reference_files=referenceFiles, export_directory=exportDir})
     if not ok then message('Could not remember settings: ' .. tostring(err)) end
   end
   local function updateReferences()
-    referenceError = nil
+    referenceError, referenceCount = nil, 0
     modify('reference_dir', referenceDir ~= '' and shorten(referenceDir, 55) or 'None')
     if referenceDir == '' then
-      modify('reference_info', 'PNG, JPEG, WebP — up to ' .. references.limit .. ' images')
+      modify('reference_info', 'PNG, JPEG, WebP — up to ' .. referenceLimit .. ' images')
       return
     end
-    local ok, folders, count = pcall(references.scan, referenceDir)
+    local ok, folders, count, files = pcall(references.scan, referenceDir)
     if not ok then referenceError=tostring(folders)
-    elseif count == 0 then referenceError='No PNG, JPEG, or WebP images in this folder.' end
-    modify('reference_info', referenceError and shorten(referenceError, 65) or references.summary(count))
+    elseif count == 0 then referenceError='No PNG, JPEG, or WebP images in this folder or subfolders.' end
+    if ok then
+      referenceCount=count
+      if referenceFiles then
+        local available={}
+        for _,name in ipairs(files) do available[name]=true end
+        for _,name in ipairs(referenceFiles) do
+          if not available[name] then referenceError='A selected image is missing. Select images again.';break end
+        end
+      end
+    end
+    updatingReferences=true
+    dialog:modify{id='reference_limit',min=1,max=math.max(references.defaultLimit,referenceCount,referenceLimit),value=referenceLimit}
+    updatingReferences=false
+    modify('reference_info', referenceError and shorten(referenceError, 65) or references.summary(count,referenceLimit,referenceFiles and #referenceFiles))
   end
   local function refreshSettings()
     if lastSettingsCheck == os.time() then return end
@@ -126,8 +150,8 @@ function M.create(core, root, session, disconnect)
     if panel.pending or not app.sprite or not available() then return end
     local helper = read('assistant-heartbeat.json')
     if referenceDir ~= '' then
-      if not helper or helper.references_version ~= 1 then
-        message('Restart the helper to use style reference images.')
+      if not helper or (tonumber(helper.references_version) or 0) < 2 then
+        message('Restart the helper to use reference image selection.')
         return
       end
       updateReferences()
@@ -152,6 +176,8 @@ function M.create(core, root, session, disconnect)
         model=models[dialog.data.model] and dialog.data.model or nil,
         effort=models[dialog.data.model] and #models[dialog.data.model].efforts > 0 and dialog.data.effort or nil,
         reference_dir=referenceDir ~= '' and referenceDir or nil,
+        reference_limit=referenceLimit,
+        reference_files=referenceDir ~= '' and referenceFiles or nil,
         context={ sprite=core.describe(sprite), selection={ empty=sprite.selection.isEmpty,
           x=bounds.x, y=bounds.y, width=bounds.width, height=bounds.height } }
       })
@@ -189,14 +215,31 @@ function M.create(core, root, session, disconnect)
   dialog:button{ id='browse_refs', text='Choose folder...', onclick=function()
     local ok, selected = pcall(references.choose, referenceDir, dialog)
     if not ok then message(tostring(selected)); return end
-    if selected then referenceDir=selected; updateReferences(); rememberSettings(); panel.tick() end
+    if selected then
+      if selected~=referenceDir then referenceFiles=nil end
+      referenceDir=selected; updateReferences(); rememberSettings(); panel.tick()
+    end
   end }
   dialog:button{ id='clear_refs', text='Clear references', onclick=function()
-    referenceDir=''
+    referenceDir='';referenceFiles=nil
     updateReferences()
     rememberSettings()
     panel.tick()
   end }
+  dialog:newrow()
+  dialog:slider{id='reference_limit',label='Max images:',min=1,max=math.max(references.defaultLimit,referenceLimit),value=referenceLimit,
+    onchange=function()
+      if updatingReferences or panel.pending then return end
+      referenceLimit=dialog.data.reference_limit
+      if referenceFiles then while #referenceFiles>referenceLimit do table.remove(referenceFiles) end end
+      updateReferences();rememberSettings();panel.tick()
+    end}
+  dialog:newrow()
+  dialog:button{id='select_refs',text='Select images...',onclick=function()
+    local ok,selected=pcall(references.pick,referenceDir,referenceLimit,referenceFiles,dialog)
+    if not ok then message(tostring(selected));return end
+    if selected then referenceFiles=selected;updateReferences();rememberSettings();panel.tick() end
+  end}
   dialog:newrow()
   dialog:label{ id='reference_info', text='' }
   dialog:newrow()
@@ -254,6 +297,16 @@ function M.create(core, root, session, disconnect)
     if not ok then message(tostring(err)) end
     app.refresh()
   end }
+  dialog:button{ id='export', text='Export...', enabled=false, onclick=function()
+    if panel.pending or not app.sprite then return end
+    local ok,result=pcall(exporter.choose,app.sprite,app.frame and app.frame.frameNumber or 1,exportDir,dialog)
+    if not ok then message('Could not export: ' .. tostring(result)); return end
+    if result then
+      exportDir=result.directory
+      rememberSettings()
+      message('Exported ' .. #result.paths .. ' PNG file(s) to ' .. exportDir)
+    end
+  end }
   dialog:button{ id='disconnect', text='Disconnect', focus=false, onclick=function()
     disconnect()
     dialog:close()
@@ -305,8 +358,11 @@ function M.create(core, root, session, disconnect)
     dialog:modify{ id='new', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='undo', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='redo', enabled=not busy and sprite ~= nil }
+    dialog:modify{ id='export', enabled=not busy and sprite ~= nil }
     dialog:modify{ id='browse_refs', enabled=not busy }
     dialog:modify{ id='clear_refs', enabled=not busy and referenceDir ~= '' }
+    dialog:modify{ id='reference_limit', enabled=not busy and referenceDir ~= '' }
+    dialog:modify{ id='select_refs', enabled=not busy and referenceDir ~= '' and referenceCount>0 }
     if not busy then modify('status', available() and 'Ready — describe a change above' or 'Start the helper with npm run assistant') end
   end
   panel.dialog = dialog

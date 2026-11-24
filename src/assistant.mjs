@@ -93,7 +93,7 @@ export class AssistantWorker {
   }
 
   async heartbeat() {
-    await write(path.join(this.root, 'assistant-heartbeat.json'), { time: Date.now() / 1000, pid: process.pid, settings_version: 1, references_version: 1 });
+    await write(path.join(this.root, 'assistant-heartbeat.json'), { time: Date.now() / 1000, pid: process.pid, settings_version: 1, references_version: 2 });
   }
 
   async tick() {
@@ -129,7 +129,9 @@ export class AssistantWorker {
             throw new Error('Selected effort is not supported by this model.');
           }
         }
-        const references = await prepareReferences(request.reference_dir, job);
+        const references = await prepareReferences(request.reference_dir, job, {
+          limit: request.reference_limit, files: request.reference_files,
+        });
         if (this.stopped || await read(path.join(job, 'cancel.json'))) throw new Error('Request cancelled before starting.');
         result = await this.run(request, job, references);
       } catch (error) { result = { ok: false, error: error.message }; }
